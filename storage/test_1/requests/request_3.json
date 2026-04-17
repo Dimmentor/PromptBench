@@ -1,0 +1,19 @@
+{
+  "model": "qwen2.5:32b",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Ты аналитик. Выдели только ключевые цифры из текста."
+    },
+    {
+      "role": "user",
+      "content": "Продажи выросли на 15%, составив 2 млн рублей за 3 квартал."
+    }
+  ],
+  "stream": false,
+  "options": {
+    "num_predict": 50,
+    "temperature": 0,
+    "top_p": 0.1
+  }
+}

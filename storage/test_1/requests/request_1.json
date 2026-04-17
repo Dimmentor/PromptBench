@@ -1,0 +1,18 @@
+{
+  "model": "qwen2.5:32b",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Ты эксперт по Python. Отвечай кратко и только кодом."
+    },
+    {
+      "role": "user",
+      "content": "Как объединить два словаря?"
+    }
+  ],
+  "stream": false,
+  "options": {
+    "temperature": 0.2,
+    "num_ctx": 2048
+  }
+}
