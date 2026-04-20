@@ -4,10 +4,10 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from src.core.config import settings
 
-LOGS_DIR = Path(f"/{settings.STORAGE}/logs")
+LOGS_DIR = Path(settings.LOGS_DIRECTORY)
 
 try:
-    LOGS_DIR.mkdir(exist_ok=True)
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
     test_file = LOGS_DIR / ".write_test"
     test_file.touch()

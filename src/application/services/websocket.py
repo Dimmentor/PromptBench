@@ -1,16 +1,27 @@
 import asyncio
+import os
 
-from src.core.database import SessionLocal
-from src.infrastructure.repositories.test_repository import TestRepository
+from starlette.websockets import WebSocketDisconnect
+
+from src.core.config import settings
+from src.infrastructure.storage.fs_tests import get_progress
 
 
-async def safe_ws_progress(websocket, test_id: int):
+async def safe_ws_progress(websocket, test_id: str):
     await websocket.accept()
 
-    while True:
-        async with SessionLocal() as session:
-            repo = TestRepository(session)
-            progress = await repo.get_progress(test_id)
+    try:
+        while True:
+            # Source of truth is the filesystem; recompute each tick.
+            if not os.path.exists(os.path.join(settings.STORAGE, test_id)):
+                await websocket.send_json({"error": "Test not found"})
+                await asyncio.sleep(2)
+                continue
 
-        await websocket.send_json(progress)
-        await asyncio.sleep(2)
+            await websocket.send_json(get_progress(test_id))
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        # Client closed the connection — normal flow.
+        return
+    except asyncio.CancelledError:
+        return

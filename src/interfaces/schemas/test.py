@@ -8,13 +8,13 @@ class TestCreate(BaseModel):
 
 
 class TestReadSimple(BaseModel):
-    id: int
+    id: str
     name: str
     status: str
 
 
 class TestRead(BaseModel):
-    id: int
+    id: str
     name: str
     status: str
     requests: List[RequestReadWithResponse] = []

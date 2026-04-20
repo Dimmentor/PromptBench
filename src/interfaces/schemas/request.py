@@ -8,15 +8,15 @@ class RequestCreate(BaseModel):
 
 
 class RequestRead(BaseModel):
-    id: int
-    test_id: int
+    id: str
+    test_id: str
     file_path: str
     status: str
 
 
 class RequestReadWithResponse(BaseModel):
-    id: int
-    test_id: int
+    id: str
+    test_id: str
     file_path: str
     status: str
     response: Optional[ResponseRead] = None

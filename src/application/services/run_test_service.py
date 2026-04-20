@@ -1,56 +1,55 @@
 import asyncio
+import os
 import time
 
-from src.core.database import SessionLocal
 from src.core.logger import logger
-from src.domain.enums import TestStatus
-from src.infrastructure.repositories.request_repository import RequestRepository
-from src.infrastructure.repositories.response_repository import ResponseRepository
+from src.infrastructure.storage.fs_tests import (
+    list_request_files,
+    compute_request,
+)
 
 
 class RunTestService:
-    def __init__(self, test_repo, request_repo, storage, llm_client):
-        self.test_repo = test_repo
-        self.request_repo = request_repo
+    def __init__(self, storage, llm_client):
         self.storage = storage
         self.llm_client = llm_client
         self.semaphore = asyncio.Semaphore(5)
 
-    async def run(self, test_id: int):
-        requests = await self.test_repo.get_requests(test_id)
+    async def run(self, test_id: str):
+        request_files = list_request_files(test_id)
 
-        async def process(req):
+        async def process(request_file_path: str):
             async with self.semaphore:
-                async with SessionLocal() as session:
-                    request_repo = RequestRepository(session)
-                    response_repo = ResponseRepository(session)
+                req = compute_request(test_id, request_file_path)
+                try:
+                    payload = await self.storage.read_json(req.file_path)
+                    start_time = time.time()
+                    response = await self.llm_client.send(payload)
+                    duration = int((time.time() - start_time) * 1000)
 
-                    try:
-                        payload = await self.storage.read_json(req.file_path)
-                        start_time = time.time()
-                        response = await self.llm_client.send(payload)
-                        duration = int((time.time() - start_time) * 1000)  # Duration in milliseconds
+                    responses_dir = os.path.join(os.path.dirname(os.path.dirname(req.file_path)), "responses")
+                    ok_path = os.path.join(responses_dir, f"response_{req.id}.json")
+                    meta_path = os.path.join(responses_dir, f"response_{req.id}.meta.json")
+                    err_path = os.path.join(responses_dir, f"response_{req.id}.error.json")
 
-                        # Use request ID for response file naming
-                        response_file_name = f"response_{req.id}.json"
-                        response_path = req.file_path.replace(f"request_{req.id}.json", response_file_name).replace("requests", "responses")
-                        await self.storage.save_json(response_path, response)
+                    await self.storage.save_json(ok_path, response)
+                    await self.storage.save_json(meta_path, {"duration": duration})
+                    await self.storage.remove_file(err_path)
+                except Exception as e:
+                    responses_dir = os.path.join(os.path.dirname(os.path.dirname(req.file_path)), "responses")
+                    err_path = os.path.join(responses_dir, f"response_{req.id}.error.json")
+                    await self.storage.save_json(err_path, {"error": str(e)})
 
-                        # Save response to database
-                        await response_repo.create(req.id, response_path, duration)
+        await asyncio.gather(*(process(rf) for rf in request_files))
 
-                        await request_repo.mark_done(req.id)
+    async def run_with_status(self, test_id: str):
+        from src.core.config import settings
 
-                    except Exception:
-                        await request_repo.mark_failed(req.id)
-
-        await asyncio.gather(*(process(r) for r in requests))
-
-    async def run_with_status(self, test_id: int):
+        marker = os.path.join(settings.STORAGE, test_id, ".running")
         try:
-            await self.test_repo.set_status(test_id, TestStatus.RUNNING)
+            await self.storage.touch(marker)
             await self.run(test_id)
-            await self.test_repo.set_status(test_id, TestStatus.COMPLETED)
         except Exception as e:
             logger.exception(f"Run test failed: {e}")
-            await self.test_repo.set_status(test_id, TestStatus.FAILED)
+        finally:
+            await self.storage.remove_file(marker)

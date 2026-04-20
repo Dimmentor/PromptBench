@@ -1,9 +1,0 @@
-{
-  "model": "qwen2.5:32b",
-  "message": {
-    "role": "assistant",
-    "content": "Пример ответа от LLM..."
-  },
-  "done": true,
-  "total_duration": 850000000
-}

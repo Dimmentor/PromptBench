@@ -2,7 +2,8 @@ from contextlib import asynccontextmanager
 from multiprocessing import cpu_count
 
 from fastapi import FastAPI
-from src.core.database import check_connection, engine
+from starlette.middleware.cors import CORSMiddleware
+
 from src.core.logger import logger
 from src.interfaces.api.endpoints.tests import router as tests_router
 
@@ -11,14 +12,12 @@ from src.interfaces.api.endpoints.tests import router as tests_router
 async def lifespan(app: FastAPI):
     try:
         logger.info("Запуск PromptBench Backend")
-        await check_connection()
         yield
     except Exception as e:
         logger.error(f"Ошибка при запуске приложения: {e}")
         raise
     finally:
         logger.info("PromptBench Backend останавливается...")
-        await engine.dispose()
 
 app = FastAPI(lifespan=lifespan, title="PromptBench", description="Примерное API для прогона промптов и параметров")
 
@@ -30,6 +29,13 @@ async def health():
 
 
 workers_count = 1 # workers_count = (cpu_count() * 2) + 1
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 if __name__ == "__main__":
     import uvicorn

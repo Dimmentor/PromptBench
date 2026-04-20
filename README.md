@@ -11,16 +11,16 @@ PromptBench — это система для сбора запросов к LLM 
 - **FastAPI** — современный веб-фреймворк для создания API
 - **Pydantic** — валидация данных и сериализация
 - **Uvicorn** — ASGI-сервер
-- **SQLAlchemy** — ORM для работы с базой данных
-- **SQLite** — база данных
-- **Alembic** — управление миграциями базы данных
+- **Файловая система** — единственный источник истины (директория `STORAGE`)
 
 ## Особенности
 
 - **Структура хранения** — данные организованы по схеме:
-  - `test_{id}/` — директория теста
-  - `test_{id}/requests/request_{id}.json` — файл запроса
-  - `test_{id}/responses/response_{id}.json` — файл ответа
+  - `<test_id>/` — директория теста (это же `id`, и это же `name`)
+  - `<test_id>/requests/<request_id>.json` — файл запроса
+  - `<test_id>/responses/response_<request_id>.json` — файл ответа
+  - `<test_id>/responses/response_<request_id>.error.json` — файл ошибки (если запрос упал)
+  - `<test_id>/.running` — маркер выполняющегося теста
 - **Асинхронная обработка** — поддержка конкурентной обработки запросов
 - **WebSocket** — отслеживание прогресса выполнения тестов в реальном времени
 - **Чистая архитектура** — разделение на domain, infrastructure, application, interfaces слои
@@ -105,22 +105,6 @@ cp .env.example .env
 ```env
 IS_PRODUCTION=false
 STORAGE=./storage
-```
-
-## Настройка базы данных
-
-### Применение миграций
-
-Для создания базы данных и применения миграций:
-
-```bash
-alembic upgrade head
-```
-
-### Создание новой миграции (не требуется, миграция уже создана)
-
-```bash
-alembic revision --autogenerate -m "description"
 ```
 
 ## Запуск приложения
@@ -239,8 +223,8 @@ curl -X POST http://localhost:8020/tests \
 Ответ:
 ```json
 {
-  "id": 1,
-  "name": "Тест 1",
+  "id": "test_1",
+  "name": "test_1",
   "status": "created"
 }
 ```
@@ -248,7 +232,7 @@ curl -X POST http://localhost:8020/tests \
 ### 2. Добавление запросов
 
 ```bash
-curl -X POST http://localhost:8020/tests/1/requests \
+curl -X POST http://localhost:8020/tests/test_1/requests \
   -H "Content-Type: application/json" \
   -d '{
           "payload": {
@@ -266,13 +250,13 @@ curl -X POST http://localhost:8020/tests/1/requests \
 ### 3. Запуск теста
 
 ```bash
-curl -X POST http://localhost:8020/tests/1/run
+curl -X POST http://localhost:8020/tests/test_1/run
 ```
 
 ### 4. Отслеживание прогресса
 
 ```bash
-curl http://localhost:8020/tests/1/progress
+curl http://localhost:8020/tests/test_1/progress
 ```
 
 Ответ:
@@ -294,12 +278,12 @@ curl http://localhost:8020/tests/1/progress
 storage/
 ├── test_1/
 │   ├── requests/
-│   │   ├── request_1.json
-│   │   ├── request_2.json
+│   │   ├── 9c2f4a2e5d6b7a10.json
+│   │   ├── 1a2b3c4d5e6f7788.json
 │   │   └── ...
 │   └── responses/
-│       ├── response_1.json
-│       ├── response_2.json
+│       ├── response_9c2f4a2e5d6b7a10.json
+│       ├── response_1a2b3c4d5e6f7788.json
 │       └── ...
 ├── test_2/
 │   └── ...
@@ -307,15 +291,7 @@ storage/
 
 ## Разработка
 
-### Добавление новой модели
-
-1. Создайте модель в `src/domain/models/`
-2. Создайте схему в `src/interfaces/schemas/`
-3. Создайте репозиторий в `src/infrastructure/repositories/`
-4. Создайте эндпоинт в `src/interfaces/api/endpoints/`
-5. Создайте миграцию: `alembic revision --autogenerate -m "description"`
-
 ### Логирование
 
-Логи записываются в `src/logs/` и выводятся в консоль.
+Логи записываются в `/logs/` и выводятся в консоль.
 
