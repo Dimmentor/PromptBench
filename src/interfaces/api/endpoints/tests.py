@@ -13,10 +13,10 @@ from src.infrastructure.storage.fs_tests import (
     get_test_status,
     get_progress,
 )
-from src.infrastructure.llm.mock_client import MockLLMClient
 from src.application.services.run_test_service import RunTestService
 from src.interfaces.schemas.test import TestCreate, TestRead, TestReadSimple, ProgressResponse
 from src.interfaces.schemas.request import RequestCreate, RequestRead
+from src.infrastructure.di import get_llm_client
 
 router = APIRouter(prefix="/tests")
 
@@ -121,7 +121,23 @@ async def create_request(
     if not os.path.exists(test_dir):
         raise HTTPException(status_code=404, detail="Test not found")
 
-    rid = unique_request_id()
+    # Optional: allow user-friendly request name -> becomes request_id / filename.
+    requests_dir = os.path.join(test_dir, "requests")
+    os.makedirs(requests_dir, exist_ok=True)
+
+    rid = None
+    if data.name is not None and str(data.name).strip() != "":
+        base = "".join(ch if (ch.isalnum() or ch in ("_", "-")) else "_" for ch in data.name.strip())
+        base = base.strip("_") or "request"
+        candidate = base
+        i = 2
+        while os.path.exists(os.path.join(requests_dir, f"{candidate}.json")):
+            candidate = f"{base}_{i}"
+            i += 1
+        rid = candidate
+    else:
+        rid = unique_request_id()
+
     file_name = f"{rid}.json"
     file_path = os.path.join(test_dir, "requests", file_name)
 
@@ -150,7 +166,7 @@ async def run_test(test_id: str):
     """Прогнать через LLM все запросы внутри теста по id(МОК)"""
     service = RunTestService(
         LocalStorageService(),
-        MockLLMClient(),
+        get_llm_client(),
     )
 
     asyncio.create_task(service.run_with_status(test_id))

@@ -4,6 +4,7 @@ from src.interfaces.schemas.response import ResponseRead
 
 
 class RequestCreate(BaseModel):
+    name: str | None = None
     payload: dict
 
 

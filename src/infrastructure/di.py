@@ -1,5 +1,5 @@
 from src.infrastructure.storage.local import LocalStorageService
-from src.infrastructure.llm.mock_client import MockLLMClient
+from src.infrastructure.llm.orchestrator_client import OrchestratorLLMClient
 
 
 def get_storage():
@@ -7,4 +7,4 @@ def get_storage():
 
 
 def get_llm_client():
-    return MockLLMClient()
+    return OrchestratorLLMClient()
