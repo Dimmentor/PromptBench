@@ -6,6 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from src.core.logger import logger
 from src.interfaces.api.endpoints.tests import router as tests_router
+from src.interfaces.api.endpoints.gateway import router as gateway_router
 
 
 @asynccontextmanager
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, title="PromptBench", description="Примерное API для прогона промптов и параметров")
 
 app.include_router(tests_router)
+app.include_router(gateway_router)
 
 @app.get("/healthcheck")
 async def health():

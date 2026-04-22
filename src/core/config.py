@@ -13,7 +13,6 @@ class Settings(BaseSettings):
     ORCHESTRATOR_TIMEOUT_SECONDS: float = 600.0
 
     model_config = SettingsConfigDict(
-        # Prefer backend/.env (repo local), fallback to root .env if present.
         env_file=[
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.env"),
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../.env"),
@@ -23,3 +22,5 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+print(settings.STORAGE)
