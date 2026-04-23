@@ -14,8 +14,8 @@ class OrchestratorLLMClient:
     We also enforce a global semaphore on our side to keep test runs strictly sequential
     (across all running tests inside this backend process).
     """
-
-    _global_semaphore = asyncio.Semaphore(1)
+    max_concurrent = settings.LLM_MAX_CONCURRENT_REQUESTS
+    _global_semaphore = asyncio.Semaphore(max_concurrent)
 
     def __init__(self, base_url: str | None = None, timeout_seconds: float | None = None):
         self.base_url = (base_url or settings.ORCHESTRATOR_BASE_URL).rstrip("/")

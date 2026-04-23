@@ -1,104 +1,45 @@
-import os
-import asyncio
-from fastapi import APIRouter, WebSocket, HTTPException
+from fastapi import APIRouter, Depends, WebSocket
 
+from src.application.services.test_app_service import TestApplicationService
 from src.application.services.websocket import safe_ws_progress
-from src.core.config import settings
-from src.infrastructure.storage.local import LocalStorageService
-from src.infrastructure.storage.fs_index import unique_test_id, unique_request_id
-from src.infrastructure.storage.fs_tests import (
-    list_test_ids,
-    list_request_files,
-    compute_request,
-    get_test_status,
-    get_progress,
-)
-from src.application.services.run_test_service import RunTestService
+from src.infrastructure.di import get_test_application_service
 from src.interfaces.schemas.test import TestCreate, TestRead, TestReadSimple, ProgressResponse
 from src.interfaces.schemas.request import RequestCreate, RequestRead
-from src.infrastructure.di import get_llm_client
 
 router = APIRouter(prefix="/tests")
 
 
 @router.post("", response_model=TestRead)
-async def create_test(data: TestCreate):
+async def create_test(
+    data: TestCreate,
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Создать тестовый слой (чтобы в будущем добавлять json запросы)"""
-
-    os.makedirs(settings.STORAGE, exist_ok=True)
-    test_id = unique_test_id(settings.STORAGE, data.name)
-    test_dir = os.path.join(settings.STORAGE, test_id)
-    os.makedirs(os.path.join(test_dir, "requests"), exist_ok=True)
-    os.makedirs(os.path.join(test_dir, "responses"), exist_ok=True)
-
-    # FS is the source of truth: name is derived from directory name.
-    request_files = list_request_files(test_id)
-    requests = []
-    for rf in request_files:
-        req = compute_request(test_id, rf)
-        resp = None
-        if req.response_file_path:
-            resp = {
-                "id": f"response_{req.id}",
-                "request_id": req.id,
-                "file_path": req.response_file_path,
-                "duration": req.duration,
-            }
-        requests.append(
-            {
-                "id": req.id,
-                "test_id": test_id,
-                "file_path": req.file_path,
-                "status": req.status,
-                "response": resp,
-            }
-        )
-
-    return {"id": test_id, "name": test_id, "status": get_test_status(test_id), "requests": requests}
+    return svc.create_test(data.name)
 
 
 @router.get("/{test_id}", response_model=TestRead)
-async def get_test(test_id: str):
+async def get_test(
+    test_id: str,
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Получить тест со связанными запросами/ответами"""
-    test_dir = os.path.join(settings.STORAGE, test_id)
-    if not os.path.exists(test_dir):
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    request_files = list_request_files(test_id)
-    requests = []
-    for rf in request_files:
-        req = compute_request(test_id, rf)
-        resp = None
-        if req.response_file_path:
-            resp = {
-                "id": f"response_{req.id}",
-                "request_id": req.id,
-                "file_path": req.response_file_path,
-                "duration": req.duration,
-            }
-        requests.append(
-            {
-                "id": req.id,
-                "test_id": test_id,
-                "file_path": req.file_path,
-                "status": req.status,
-                "response": resp,
-            }
-        )
-
-    return {"id": test_id, "name": test_id, "status": get_test_status(test_id), "requests": requests}
+    return svc.get_test(test_id)
 
 
 @router.get("", response_model=list[TestReadSimple])
-async def list_tests():
+async def list_tests(
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Список созданных тестов со статусами"""
-    return [{"id": tid, "name": tid, "status": get_test_status(tid)} for tid in list_test_ids()]
+    return svc.list_tests()
 
 
 @router.post("/{test_id}/requests", response_model=RequestRead)
 async def create_request(
-        test_id: str,
-        data: RequestCreate,
+    test_id: str,
+    data: RequestCreate,
+    svc: TestApplicationService = Depends(get_test_application_service),
 ):
     """
     Создать запрос внутри теста
@@ -115,166 +56,75 @@ async def create_request(
           }
         }
     """
-    storage = LocalStorageService()
-
-    test_dir = os.path.join(settings.STORAGE, test_id)
-    if not os.path.exists(test_dir):
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    # Optional: allow user-friendly request name -> becomes request_id / filename.
-    requests_dir = os.path.join(test_dir, "requests")
-    os.makedirs(requests_dir, exist_ok=True)
-
-    rid = None
-    if data.name is not None and str(data.name).strip() != "":
-        base = "".join(ch if (ch.isalnum() or ch in ("_", "-")) else "_" for ch in data.name.strip())
-        base = base.strip("_") or "request"
-        candidate = base
-        i = 2
-        while os.path.exists(os.path.join(requests_dir, f"{candidate}.json")):
-            candidate = f"{base}_{i}"
-            i += 1
-        rid = candidate
-    else:
-        rid = unique_request_id()
-
-    file_name = f"{rid}.json"
-    file_path = os.path.join(test_dir, "requests", file_name)
-
-    await storage.save_json(file_path, data.payload)
-
-    return {"id": rid, "test_id": test_id, "file_path": file_path, "status": "pending"}
+    return await svc.create_request(test_id, data.payload, data.name)
 
 
 @router.delete("/{test_id}")
-async def delete_test(test_id: str):
+async def delete_test(
+    test_id: str,
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Удалить тест по id"""
-    from src.core.config import settings
-    storage = LocalStorageService()
-
-    test_dir = os.path.join(settings.STORAGE, test_id)
-    if not os.path.exists(test_dir):
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    await storage.remove_tree(test_dir)
-
-    return {"status": "deleted"}
+    return await svc.delete_test(test_id)
 
 
 @router.post("/{test_id}/run")
-async def run_test(test_id: str):
+async def run_test(
+    test_id: str,
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Прогнать через LLM все запросы внутри теста по id(МОК)"""
-    service = RunTestService(
-        LocalStorageService(),
-        get_llm_client(),
-    )
+    return await svc.schedule_test_run(test_id)
 
-    asyncio.create_task(service.run_with_status(test_id))
-
-    return {"status": "started"}
 
 @router.get("/{test_id}/requests/{request_id}/payload")
-async def get_request_payload(test_id: str, request_id: str):
+async def get_request_payload(
+    test_id: str,
+    request_id: str,
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Получить содержимое payload json для request внутри test (без передачи file_path)"""
-
-    test_dir = os.path.join(settings.STORAGE, test_id)
-    if not os.path.exists(test_dir):
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    # Strictly derive path from ids to avoid arbitrary file reads.
-    request_path = os.path.join(test_dir, "requests", f"{request_id}.json")
-    if not os.path.exists(request_path):
-        raise HTTPException(status_code=404, detail="Request payload not found")
-
-    storage = LocalStorageService()
-    data = await storage.read_json(request_path)
-    return {"test_id": test_id, "request_id": request_id, "file_path": request_path, "payload": data}
+    return await svc.get_request_payload(test_id, request_id)
 
 
 @router.put("/{test_id}/requests/{request_id}/payload")
-async def save_request_payload(test_id: str, request_id: str, data: RequestCreate):
+async def save_request_payload(
+    test_id: str,
+    request_id: str,
+    data: RequestCreate,
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Перезаписать payload json для request внутри test (без передачи file_path)"""
-
-    test_dir = os.path.join(settings.STORAGE, test_id)
-    if not os.path.exists(test_dir):
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    request_path = os.path.join(test_dir, "requests", f"{request_id}.json")
-    if not os.path.exists(request_path):
-        raise HTTPException(status_code=404, detail="Request payload not found")
-
-    storage = LocalStorageService()
-    await storage.save_json(request_path, data.payload)
-    return {"status": "saved", "test_id": test_id, "request_id": request_id, "file_path": request_path}
+    return await svc.save_request_payload(test_id, request_id, data.payload)
 
 
 @router.delete("/{test_id}/requests/{request_id}/payload")
-async def delete_request_payload(test_id: str, request_id: str):
+async def delete_request_payload(
+    test_id: str,
+    request_id: str,
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Удалить request payload файл и связанные response файлы (если существуют)"""
-
-    test_dir = os.path.join(settings.STORAGE, test_id)
-    if not os.path.exists(test_dir):
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    request_path = os.path.join(test_dir, "requests", f"{request_id}.json")
-    if not os.path.exists(request_path):
-        raise HTTPException(status_code=404, detail="Request payload not found")
-
-    storage = LocalStorageService()
-    await storage.remove_file(request_path)
-
-    responses_dir = os.path.join(test_dir, "responses")
-    ok_path = os.path.join(responses_dir, f"response_{request_id}.json")
-    meta_path = os.path.join(responses_dir, f"response_{request_id}.meta.json")
-    err_path = os.path.join(responses_dir, f"response_{request_id}.error.json")
-
-    await storage.remove_file(ok_path)
-    await storage.remove_file(meta_path)
-    await storage.remove_file(err_path)
-
-    return {"status": "deleted", "test_id": test_id, "request_id": request_id}
+    return await svc.delete_request_payload(test_id, request_id)
 
 
 @router.get("/{test_id}/requests/{request_id}/response")
-async def get_request_response(test_id: str, request_id: str):
+async def get_request_response(
+    test_id: str,
+    request_id: str,
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Получить содержимое response json + meta/error (если есть) для request внутри test"""
-
-    test_dir = os.path.join(settings.STORAGE, test_id)
-    if not os.path.exists(test_dir):
-        raise HTTPException(status_code=404, detail="Test not found")
-
-    responses_dir = os.path.join(test_dir, "responses")
-    ok_path = os.path.join(responses_dir, f"response_{request_id}.json")
-    meta_path = os.path.join(responses_dir, f"response_{request_id}.meta.json")
-    err_path = os.path.join(responses_dir, f"response_{request_id}.error.json")
-
-    storage = LocalStorageService()
-
-    ok = await storage.read_json(ok_path) if os.path.exists(ok_path) else None
-    meta = await storage.read_json(meta_path) if os.path.exists(meta_path) else None
-    err = await storage.read_json(err_path) if os.path.exists(err_path) else None
-
-    if ok is None and meta is None and err is None:
-        raise HTTPException(status_code=404, detail="Response not found")
-
-    return {
-        "test_id": test_id,
-        "request_id": request_id,
-        "ok_file_path": ok_path if os.path.exists(ok_path) else None,
-        "meta_file_path": meta_path if os.path.exists(meta_path) else None,
-        "error_file_path": err_path if os.path.exists(err_path) else None,
-        "response": ok,
-        "meta": meta,
-        "error": err,
-    }
+    return await svc.get_request_response(test_id, request_id)
 
 
 @router.get("/{test_id}/progress", response_model=ProgressResponse)
-async def get_progress_route(test_id: str):
+async def get_progress_route(
+    test_id: str,
+    svc: TestApplicationService = Depends(get_test_application_service),
+):
     """Получить статус теста по id со статусами всех запросов"""
-    if not os.path.exists(os.path.join(settings.STORAGE, test_id)):
-        raise HTTPException(status_code=404, detail="Test not found")
-    return get_progress(test_id)
+    return svc.get_progress(test_id)
 
 
 @router.websocket("/ws/{test_id}")

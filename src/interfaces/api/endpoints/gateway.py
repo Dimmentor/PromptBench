@@ -1,29 +1,21 @@
-import json
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from starlette.responses import StreamingResponse
 
-from src.infrastructure.di import get_llm_client
+from src.application.services.gateway_app_service import GatewayApplicationService
+from src.infrastructure.di import get_gateway_application_service
 from src.interfaces.schemas.gateway import GatewayBatchItem
 
 router = APIRouter(prefix="/gateway", tags=["gateway"])
 
 
 @router.post("/batch/stream")
-async def gateway_batch_stream(items: list[GatewayBatchItem]):
-
-    llm = get_llm_client()
-
+async def gateway_batch_stream(
+    items: list[GatewayBatchItem],
+    svc: GatewayApplicationService = Depends(get_gateway_application_service),
+):
     async def gen():
-        for item in items:
-            try:
-                resp = await llm.send(dict(item.payload))
-                data = {"id": item.id, "payload": resp}
-            except Exception as e:
-                data = {"id": item.id, "error": {"message": "Orchestrator request failed", "details": str(e)}}
-
-            yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-        yield "data: [DONE]\n\n"
+        async for chunk in svc.stream_batch_sse(items):
+            yield chunk
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 

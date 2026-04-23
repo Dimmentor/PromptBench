@@ -2,8 +2,11 @@ from contextlib import asynccontextmanager
 from multiprocessing import cpu_count
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
 
+from src.application.exceptions import NotFoundError
 from src.core.logger import logger
 from src.interfaces.api.endpoints.tests import router as tests_router
 from src.interfaces.api.endpoints.gateway import router as gateway_router
@@ -21,6 +24,12 @@ async def lifespan(app: FastAPI):
         logger.info("PromptBench Backend останавливается...")
 
 app = FastAPI(lifespan=lifespan, title="PromptBench", description="Примерное API для прогона промптов и параметров")
+
+
+@app.exception_handler(NotFoundError)
+async def not_found_error_handler(_request: Request, exc: NotFoundError):
+    return JSONResponse(status_code=404, content={"detail": exc.detail})
+
 
 app.include_router(tests_router)
 app.include_router(gateway_router)
